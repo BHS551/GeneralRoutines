@@ -80,6 +80,35 @@ curl -X POST https://<tu-dominio>/webhook \
 
 Ver [`scripts/fire_test.sh`](scripts/fire_test.sh) y [`webhooks/proxy.py`](webhooks/proxy.py) para los ejemplos completos.
 
+## Autenticación del webhook
+
+El proxy soporta dos esquemas (ambos opcionales; basta con satisfacer uno si se configuran ambos):
+
+| Esquema | Variable | Header esperado | Para |
+|---------|----------|-----------------|------|
+| Token estático | `MSP_WEBHOOK_TOKEN` | `Authorization: Bearer <token>` o `X-Webhook-Token: <token>` | MSPs con solo headers fijos (**Datadog**, PagerDuty) |
+| Firma HMAC | `MSP_WEBHOOK_SECRET` | `X-MSP-Signature: sha256=<hex>` | MSPs que firman el payload (Zabbix, integraciones custom) |
+
+Si no se define ninguna variable, el proxy no exige auth (solo desarrollo).
+
+### Configurar en Datadog
+
+Datadog no firma sus webhooks, así que se usa el **token estático**. En **Integrations → Webhooks**:
+
+1. **URL:** `https://<tu-dominio>/webhook`
+2. **Custom headers:** `Authorization: Bearer <MSP_WEBHOOK_TOKEN>`
+3. **Payload:**
+   ```json
+   {
+     "text": "$ALERT_TITLE — $EVENT_MSG",
+     "service": "$ALERT_SCOPE",
+     "severity": "$ALERT_PRIORITY"
+   }
+   ```
+4. En el monitor, añade `@webhook-<nombre>` al mensaje para disparar.
+
+El campo `text` es el que el proxy extrae como cuerpo de la alerta.
+
 ## Despliegue del proxy (Fase D)
 
 ```bash
@@ -94,9 +123,11 @@ docker build -f webhooks/Dockerfile -t msp-webhook-proxy .
 docker run -p 8080:8080 \
   -e ROUTINE_ID=xxx \
   -e ROUTINE_FIRE_TOKEN=yyy \
-  -e MSP_WEBHOOK_SECRET=zzz \
+  -e MSP_WEBHOOK_TOKEN=zzz \
   msp-webhook-proxy
 ```
+
+> Para Datadog usa `MSP_WEBHOOK_TOKEN`; para un MSP que firma el payload usa `MSP_WEBHOOK_SECRET`.
 
 ## Credenciales necesarias
 
@@ -104,7 +135,8 @@ docker run -p 8080:8080 \
 |----------------------------|--------------------------------------------------------------|
 | `ROUTINE_ID`               | ID de la rutina en Claude Code                               |
 | `ROUTINE_FIRE_TOKEN`       | Token de disparo de la rutina (se muestra solo una vez)      |
-| `MSP_WEBHOOK_SECRET`       | Secreto HMAC para validar firma del MSP (producción)         |
+| `MSP_WEBHOOK_TOKEN`        | Token estático para auth por header (ej. Datadog)            |
+| `MSP_WEBHOOK_SECRET`       | Secreto HMAC para MSPs que firman el payload                 |
 | `CONFLUENCE_API_TOKEN`     | Token de API de Confluence                                   |
 | `CONFLUENCE_EMAIL`         | Email de la cuenta de servicio de Confluence                 |
 | `CONFLUENCE_BASE_URL`      | URL base de la instancia de Confluence                       |

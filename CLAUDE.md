@@ -141,7 +141,8 @@ Registrar: `[FASE 5] Ticket creado: <JIRA-KEY> asignado a <ingeniero>`
 
 - `ROUTINE_ID` — ID de la rutina en Claude Code
 - `ROUTINE_FIRE_TOKEN` — Token de disparo (guárdalo en el gestor de secretos del proxy)
-- `MSP_WEBHOOK_SECRET` — Secreto HMAC para validar firmas del MSP (recomendado en producción)
+- `MSP_WEBHOOK_TOKEN` — Token estático compartido para MSPs que solo envían headers fijos (ej. Datadog). Se valida desde `Authorization: Bearer <token>` o `X-Webhook-Token: <token>`.
+- `MSP_WEBHOOK_SECRET` — Secreto HMAC para MSPs que firman el payload (`X-MSP-Signature: sha256=<hex>`). Si se definen ambos, basta con que la petición satisfaga uno.
 - `LOG_LEVEL` — Nivel de logging (`INFO` por defecto, `DEBUG` para depuración)
 - `CONFIDENCE_THRESHOLD` — Umbral mínimo de confianza para no requerir revisión humana (default: `60`)
 - `WARN_TOKENS_PER_HOUR` — Umbral de tokens/hora para alertar sobre consumo elevado (default: `80000`)

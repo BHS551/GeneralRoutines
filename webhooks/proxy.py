@@ -40,7 +40,7 @@ async def receive_msp_webhook(request: Request) -> Response:
     """
     body = await request.body()
 
-    _verify_msp_signature(request, body)
+    _verify_msp_auth(request, body)
 
     payload = await request.json()
     alert_text = _extract_alert_text(payload)
@@ -77,21 +77,51 @@ async def health() -> dict:
     return {"status": "ok", "ts": int(time.time())}
 
 
-def _verify_msp_signature(request: Request, body: bytes) -> None:
+def _verify_msp_auth(request: Request, body: bytes) -> None:
     """
-    Valida la firma HMAC del webhook si MSP_WEBHOOK_SECRET está definido.
-    Omitir en desarrollo; obligatorio en producción.
+    Autentica el webhook entrante. Soporta dos esquemas, ambos opcionales:
+
+      - Token estático (MSP_WEBHOOK_TOKEN): para MSPs que solo permiten headers
+        fijos, como Datadog. Se lee de 'Authorization: Bearer <token>' o de
+        'X-Webhook-Token: <token>'.
+      - Firma HMAC (MSP_WEBHOOK_SECRET): para MSPs que firman el payload con
+        HMAC-SHA256, enviado en 'X-MSP-Signature: sha256=<hex>'.
+
+    Si no se configura ninguno, se omite la validación (solo desarrollo).
+    Si se configura al menos uno, la petición debe satisfacer alguno de ellos.
     """
+    token = os.environ.get("MSP_WEBHOOK_TOKEN")
     secret = os.environ.get("MSP_WEBHOOK_SECRET")
-    if not secret:
+
+    if not token and not secret:
         return
 
-    signature_header = request.headers.get("X-MSP-Signature", "")
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if token and _check_static_token(request, token):
+        return
+    if secret and _check_hmac_signature(request, body, secret):
+        return
 
-    if not hmac.compare_digest(f"sha256={expected}", signature_header):
-        log.warning("Firma de webhook inválida")
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    log.warning("Autenticación de webhook fallida")
+    raise HTTPException(status_code=401, detail="Invalid webhook authentication")
+
+
+def _check_static_token(request: Request, expected: str) -> bool:
+    """Valida un token compartido estático en 'Authorization' o 'X-Webhook-Token'."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        presented = auth[len("Bearer "):]
+        if hmac.compare_digest(presented, expected):
+            return True
+
+    presented = request.headers.get("X-Webhook-Token", "")
+    return bool(presented) and hmac.compare_digest(presented, expected)
+
+
+def _check_hmac_signature(request: Request, body: bytes, secret: str) -> bool:
+    """Valida la firma HMAC-SHA256 del payload en 'X-MSP-Signature'."""
+    signature_header = request.headers.get("X-MSP-Signature", "")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return bool(signature_header) and hmac.compare_digest(expected, signature_header)
 
 
 def _extract_alert_text(payload: dict) -> str:
