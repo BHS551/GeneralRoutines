@@ -129,6 +129,24 @@ docker run -p 8080:8080 \
 
 > Para Datadog usa `MSP_WEBHOOK_TOKEN`; para un MSP que firma el payload usa `MSP_WEBHOOK_SECRET`.
 
+## Proveedor de ejecución (Anthropic o Cursor)
+
+El proxy puede disparar la rutina en dos proveedores, según la env var `PROVIDER`:
+
+| `PROVIDER` | Qué hace | Modelo |
+|------------|----------|--------|
+| `anthropic` (default) | Dispara una Claude Code Routine vía `/fire` | Fire-and-forget: Anthropic ejecuta y no se espera respuesta |
+| `cursor` | Lanza un Cloud Agent vía `POST /v1/agents` | El proxy hace **polling** del run (la API v1 de Cursor aún no entrega callbacks) y registra el estado hasta `FINISHED`/`ERROR` |
+
+Para Cursor, configura `CURSOR_API_KEY` y `CURSOR_REPO_URL` (ver tabla de credenciales). El agente recibe un prompt que sigue las fases de `CLAUDE.md` (revisión, debug, propuesta de resolución, ticket) y puede abrir el PR automáticamente (`CURSOR_AUTO_CREATE_PR`).
+
+## Control de volumen (evitar tormentas de tickets)
+
+Dos capas, complementarias:
+
+1. **En Datadog** (en el origen): notification grouping, ventanas de evaluación, "notify on" tras N fallos, renotify con límite, y muting de dependencias. Apunta solo los monitores deseados con `@webhook-<nombre>`.
+2. **En el proxy** (red de seguridad): deduplicación por huella de alerta. Alertas idénticas dentro de `DEDUP_TTL_SECONDS` (default 300s) se descartan con `200 deduplicated` en vez de generar un ticket nuevo. La huella se borra si el disparo falla, para permitir reintentos legítimos.
+
 ## Credenciales necesarias
 
 | Variable de entorno        | Descripción                                                  |
@@ -137,6 +155,10 @@ docker run -p 8080:8080 \
 | `ROUTINE_FIRE_TOKEN`       | Token de disparo de la rutina (se muestra solo una vez)      |
 | `MSP_WEBHOOK_TOKEN`        | Token estático para auth por header (ej. Datadog)            |
 | `MSP_WEBHOOK_SECRET`       | Secreto HMAC para MSPs que firman el payload                 |
+| `PROVIDER`                 | `anthropic` (default) o `cursor`                            |
+| `DEDUP_TTL_SECONDS`        | Ventana de dedup de alertas idénticas (default 300)         |
+| `CURSOR_API_KEY`           | API key de Cursor (solo `PROVIDER=cursor`)                  |
+| `CURSOR_REPO_URL`          | Repo del Cloud Agent (solo `PROVIDER=cursor`)               |
 | `CONFLUENCE_API_TOKEN`     | Token de API de Confluence                                   |
 | `CONFLUENCE_EMAIL`         | Email de la cuenta de servicio de Confluence                 |
 | `CONFLUENCE_BASE_URL`      | URL base de la instancia de Confluence                       |

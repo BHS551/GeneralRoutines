@@ -146,6 +146,21 @@ Registrar: `[FASE 5] Ticket creado: <JIRA-KEY> asignado a <ingeniero>`
 - `LOG_LEVEL` — Nivel de logging (`INFO` por defecto, `DEBUG` para depuración)
 - `CONFIDENCE_THRESHOLD` — Umbral mínimo de confianza para no requerir revisión humana (default: `60`)
 - `WARN_TOKENS_PER_HOUR` — Umbral de tokens/hora para alertar sobre consumo elevado (default: `80000`)
+- `DEDUP_TTL_SECONDS` — Ventana de deduplicación de alertas idénticas (default: `300`). Evita tickets repetidos cuando el MSP dispara la misma alerta varias veces.
+
+### Selección de proveedor (PROVIDER)
+
+- `PROVIDER` — `anthropic` (default) dispara una Claude Code Routine vía `/fire`; `cursor` lanza un Cloud Agent.
+
+Variables solo para `PROVIDER=cursor`:
+
+- `CURSOR_API_KEY` — API key de Cursor (Bearer).
+- `CURSOR_REPO_URL` — Repo sobre el que trabaja el agente.
+- `CURSOR_STARTING_REF` — Rama/ref de partida (default: `main`).
+- `CURSOR_MODEL` — Modelo del agente (default: `composer-2`).
+- `CURSOR_AUTO_CREATE_PR` — Abrir PR automáticamente (default: `true`).
+- `CURSOR_API_BASE` — Host de la API (default: `https://api.cursor.com`).
+- `CURSOR_POLL_INTERVAL` / `CURSOR_MAX_POLLS` — Cadencia y tope del polling del run (la API v1 de Cursor aún no entrega callbacks).
 
 ## Despliegue del proxy de webhook (Fase D)
 
