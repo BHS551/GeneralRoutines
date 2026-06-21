@@ -51,7 +51,11 @@ async def receive_msp_webhook(request: Request) -> Response:
 
     log.info("Alerta recibida desde MSP", extra={"text_preview": alert_text[:120]})
 
-    fire_response = await _fire_routine(alert_text)
+    try:
+        fire_response = await _fire_routine(alert_text)
+    except RuntimeError as exc:
+        log.error("No se pudo disparar la rutina", extra={"error": str(exc)})
+        raise HTTPException(status_code=502, detail="Routine fire endpoint unavailable") from exc
 
     log.info(
         "Rutina disparada",
