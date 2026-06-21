@@ -131,7 +131,36 @@ Registrar: `[FASE 5] Ticket creado: <JIRA-KEY> asignado a <ingeniero>`
 
 ## Manejo de errores global
 
-- Si una herramienta falla 2 veces → anotar y continuar con datos parciales.
-- Si la confianza es baja → marcar para revisión humana (label `needs-human-review`).
+- Si una herramienta falla 2 veces → usar `utils/error_handler.py::with_retry` y anotar con `ToolFailureTracker`. Continuar con datos parciales.
+- Si la confianza es baja (< 60%) o hay fallos de herramientas → llamar a `utils/error_handler.py::needs_human_review` y añadir el label `needs-human-review` al ticket. No asignar a un ingeniero específico en ese caso.
 - Nunca inventar respuestas de APIs ni datos que no se hayan obtenido explícitamente.
-- Registrar cada decisión con `[FASE X]` para trazabilidad completa.
+- Registrar cada decisión con `[FASE X]` usando `utils/logger.py::log_phase` para trazabilidad completa en JSON estructurado.
+- Para métricas de tokens y salud: usar `utils/monitor.py` al inicio (`start_session`) y al cierre (`end_session`) de cada ejecución.
+
+## Variables de entorno adicionales (Fase D — Producción)
+
+- `ROUTINE_ID` — ID de la rutina en Claude Code
+- `ROUTINE_FIRE_TOKEN` — Token de disparo (guárdalo en el gestor de secretos del proxy)
+- `MSP_WEBHOOK_SECRET` — Secreto HMAC para validar firmas del MSP (recomendado en producción)
+- `LOG_LEVEL` — Nivel de logging (`INFO` por defecto, `DEBUG` para depuración)
+- `CONFIDENCE_THRESHOLD` — Umbral mínimo de confianza para no requerir revisión humana (default: `60`)
+- `WARN_TOKENS_PER_HOUR` — Umbral de tokens/hora para alertar sobre consumo elevado (default: `80000`)
+
+## Despliegue del proxy de webhook (Fase D)
+
+El proxy vive en `webhooks/proxy.py` y se despliega como un servicio HTTP ligero:
+
+```bash
+# Desarrollo local
+uvicorn webhooks.proxy:app --reload --port 8080
+
+# Producción (Docker)
+docker build -f webhooks/Dockerfile -t msp-webhook-proxy .
+docker run -p 8080:8080 \
+  -e ROUTINE_ID=xxx \
+  -e ROUTINE_FIRE_TOKEN=yyy \
+  -e MSP_WEBHOOK_SECRET=zzz \
+  msp-webhook-proxy
+```
+
+El MSP apunta su webhook a `https://<tu-dominio>/webhook`. El proxy valida la firma, extrae el texto y dispara la rutina con los headers correctos.
