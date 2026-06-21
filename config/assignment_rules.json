@@ -1,0 +1,47 @@
+{
+  "_comment": "Mapeo de servicio/módulo → accountId de Jira del ingeniero responsable. Actualizar con los accountIds reales del equipo.",
+  "services": {
+    "checkout-service": {
+      "accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Ingeniero A",
+      "team": "payments"
+    },
+    "auth-service": {
+      "accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Ingeniero B",
+      "team": "identity"
+    },
+    "api-gateway": {
+      "accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Ingeniero C",
+      "team": "platform"
+    },
+    "notification-service": {
+      "accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Ingeniero D",
+      "team": "comms"
+    }
+  },
+  "teams": {
+    "payments": {
+      "lead_accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Lead Payments"
+    },
+    "identity": {
+      "lead_accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Lead Identity"
+    },
+    "platform": {
+      "lead_accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Lead Platform"
+    },
+    "comms": {
+      "lead_accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+      "name": "Lead Comms"
+    }
+  },
+  "default_assignee": {
+    "accountId": "REPLACE_WITH_JIRA_ACCOUNT_ID",
+    "name": "On-call Engineer"
+  }
+}

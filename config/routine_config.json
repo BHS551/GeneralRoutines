@@ -1,0 +1,29 @@
+{
+  "routine": {
+    "name": "msp-alert-to-jira",
+    "description": "Convierte alertas de monitoreo MSP en tickets de Jira con análisis inteligente"
+  },
+  "jira": {
+    "issue_type": "Bug",
+    "summary_prefix": "[AUTO]",
+    "labels": ["auto-generated"],
+    "confidence_threshold_for_human_review": 0.6
+  },
+  "confluence": {
+    "spaces": ["ENG", "OPS", "RUNBOOKS"],
+    "max_results": 5
+  },
+  "github": {
+    "org": "REPLACE_WITH_GITHUB_ORG",
+    "recent_commits_days": 7,
+    "max_files_to_review": 10
+  },
+  "google_docs": {
+    "shared_drive_id": "REPLACE_WITH_DRIVE_ID",
+    "max_results": 5
+  },
+  "error_handling": {
+    "max_tool_retries": 2,
+    "on_low_confidence_label": "needs-human-review"
+  }
+}
