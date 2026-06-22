@@ -80,42 +80,181 @@ curl -X POST https://<tu-dominio>/webhook \
 
 Ver [`scripts/fire_test.sh`](scripts/fire_test.sh) y [`webhooks/proxy.py`](webhooks/proxy.py) para los ejemplos completos.
 
-## Autenticación del webhook
+## Datadog directo (sin proxy)
 
-El proxy soporta dos esquemas (ambos opcionales; basta con satisfacer uno si se configuran ambos):
+Para empezar sin infraestructura adicional, Datadog puede llamar directamente a la API del proveedor. El payload incluye el texto de la alerta y los headers de autenticación se configuran como "Custom headers" en la integración.
 
-| Esquema | Variable | Header esperado | Para |
-|---------|----------|-----------------|------|
-| Token estático | `MSP_WEBHOOK_TOKEN` | `Authorization: Bearer <token>` o `X-Webhook-Token: <token>` | MSPs con solo headers fijos (**Datadog**, PagerDuty) |
-| Firma HMAC | `MSP_WEBHOOK_SECRET` | `X-MSP-Signature: sha256=<hex>` | MSPs que firman el payload (Zabbix, integraciones custom) |
+> **Sin proxy pierdes:** deduplicación en el receptor, visibilidad del estado de runs de Cursor, y pre-filtrado centralizado. Con proxy bajo tráfico alto o múltiples fuentes de alertas, la capa intermedia vale la pena.
 
-Si no se define ninguna variable, el proxy no exige auth (solo desarrollo).
+### Opción A — Datadog → Anthropic `/fire` (recomendado para empezar)
 
-### Configurar en Datadog
+En **Integrations → Webhooks → New Webhook**:
 
-Datadog no firma sus webhooks, así que se usa el **token estático**. En **Integrations → Webhooks**:
+| Campo | Valor |
+|-------|-------|
+| **URL** | `https://api.anthropic.com/v1/routines/<ROUTINE_ID>/fire` |
+| **Method** | `POST` |
 
-1. **URL:** `https://<tu-dominio>/webhook`
-2. **Custom headers:** `Authorization: Bearer <MSP_WEBHOOK_TOKEN>`
-3. **Payload:**
-   ```json
-   {
-     "text": "$ALERT_TITLE — $EVENT_MSG",
-     "service": "$ALERT_SCOPE",
-     "severity": "$ALERT_PRIORITY"
-   }
-   ```
-4. En el monitor, añade `@webhook-<nombre>` al mensaje para disparar.
+**Custom headers** (uno por línea en la UI de Datadog):
 
-El campo `text` es el que el proxy extrae como cuerpo de la alerta.
+```
+Authorization: Bearer <ROUTINE_FIRE_TOKEN>
+anthropic-beta: experimental-cc-routine-2026-04-01
+Content-Type: application/json
+```
 
-## Despliegue del proxy (Fase D)
+> Datadog permite múltiples custom headers en la integración de webhooks. Los tres son necesarios: sin `anthropic-beta` el endpoint devuelve 404.
+
+**Payload** (pestaña "Payload" en la UI):
+
+```json
+{
+  "text": "$ALERT_TITLE — $EVENT_MSG",
+  "service": "$ALERT_SCOPE",
+  "severity": "$ALERT_PRIORITY",
+  "monitor_id": "$ALERT_ID",
+  "env": "$HOSTNAME"
+}
+```
+
+Anthropic acepta el body completo y lo pasa como `text` al agente. El agente (CLAUDE.md) ya parsea `text` en la Fase 1.
+
+### Opción B — Datadog → Cursor Cloud Agents
+
+En **Integrations → Webhooks → New Webhook**:
+
+| Campo | Valor |
+|-------|-------|
+| **URL** | `https://api.cursor.com/v1/agents` |
+| **Method** | `POST` |
+
+**Custom headers**:
+
+```
+Authorization: Bearer <CURSOR_API_KEY>
+Content-Type: application/json
+```
+
+**Payload**:
+
+```json
+{
+  "prompt": {
+    "text": "Analiza esta alerta de monitoreo y sigue las fases del runbook: $ALERT_TITLE — $EVENT_MSG. Servicio: $ALERT_SCOPE. Severidad: $ALERT_PRIORITY."
+  },
+  "repos": [
+    {
+      "url": "https://github.com/<org>/<repo>",
+      "ref": "main"
+    }
+  ],
+  "model": {
+    "id": "composer-2"
+  }
+}
+```
+
+> La API v1 de Cursor no devuelve callbacks: el run se ejecuta en background. Para ver el estado usa el dashboard de Cursor o monta el proxy con `PROVIDER=cursor` para polling automático.
+
+### Seleccionar qué monitores disparan el webhook
+
+No añadas `@webhook-<nombre>` a todos los monitores. En el mensaje de cada monitor de Datadog:
+
+```
+{{#is_alert}}
+Alerta en {{service.name}}: {{value}} supera el umbral de {{threshold}}.
+@webhook-jira-routine
+{{/is_alert}}
+```
+
+Añade `@webhook-jira-routine` **solo** a los monitores que quieres que generen un ticket. Monitores informativos o de baja prioridad no deben incluirlo.
+
+---
+
+## Control de volumen (evitar tormentas de tickets)
+
+El control se aplica en Datadog, antes de que se dispare cualquier llamada al proveedor.
+
+### 1. Ventana de evaluación sostenida
+
+En la configuración del monitor, pestaña **"Set alert conditions"**:
+
+- **Evaluation window:** `5 minutes` o más (evita alertar por spikes de 1 minuto)
+- **Alert when:** `the value is above threshold for the last X of Y data points` — requiere que el problema sea sostenido, no puntual
+
+### 2. Umbral de fallos consecutivos ("Notify on")
+
+En **"Advanced alert conditions"**:
+
+```
+Notify if the monitor has been in alert state for at least: 3 consecutive checks
+```
+
+Con esto, un flap de 1-2 checks no genera ticket. Solo problemas reales y persistentes pasan.
+
+### 3. Re-notificación limitada
+
+En la sección **"Notify your team"** del monitor:
+
+```
+Re-notify after: 4 hours
+Renotify for: 1 time
+```
+
+Así, si el problema persiste, solo recibes un recordatorio, no una ráfaga de tickets adicionales.
+
+### 4. Notification grouping
+
+En el campo **"Group by"** del monitor:
+
+```
+Group by: service, env
+```
+
+Datadog agrupa instancias del mismo problema y manda una sola notificación por grupo, no una por cada host afectado.
+
+### 5. Muting de dependencias
+
+Si tienes un monitor de base de datos y monitores de servicios que dependen de ella:
+
+- En **Monitor → Edit → Composite monitors**: crea un composite que solo alerte sobre el servicio si la DB **no** está en alert.
+- O usa **Downtimes**: cuando la DB entra en alerta, crea un downtime automático sobre los monitores dependientes para suprimir el ruido.
+
+### 6. Filtrar por entorno
+
+Usa tags de Datadog para que el webhook solo se dispare en producción:
+
+```
+{{#is_alert}}{{#is_match "env" "production"}}
+@webhook-jira-routine
+{{/is_match}}{{/is_alert}}
+```
+
+Staging y dev no generan tickets.
+
+### 7. Resumen de configuración recomendada por tipo de alerta
+
+| Tipo de alerta | Evaluation window | Consecutive checks | Re-notify | Webhook |
+|----------------|-------------------|--------------------|-----------|---------|
+| Error 5xx crítico | 2 min | 2 | 2h × 1 | ✅ |
+| Latencia elevada | 5 min | 3 | 4h × 1 | ✅ |
+| CPU/mem alta | 10 min | 5 | 8h × 1 | ✅ |
+| Disco > 80% | 15 min | 3 | 24h × 1 | ✅ |
+| Info / heartbeat | — | — | — | ❌ |
+
+---
+
+## Proxy de webhook (opcional, para producción avanzada)
+
+El proxy en `webhooks/proxy.py` añade sobre el modo directo:
+- **Deduplicación**: alertas idénticas dentro de `DEDUP_TTL_SECONDS` (default 300s) se descartan con `200 deduplicated`.
+- **Polling de Cursor**: monitoriza el estado del run hasta `FINISHED`/`ERROR` y lo registra.
+- **Auth centralizada**: el secreto HMAC o el token no viajan en el payload de Datadog.
+- **Pre-filtrado**: lógica custom antes de disparar (filtros de severidad, reglas adicionales).
 
 ```bash
-# Instalar dependencias
-pip install -r requirements.txt
-
 # Desarrollo local
+pip install -r requirements.txt
 uvicorn webhooks.proxy:app --reload --port 8080
 
 # Producción con Docker
@@ -124,28 +263,27 @@ docker run -p 8080:8080 \
   -e ROUTINE_ID=xxx \
   -e ROUTINE_FIRE_TOKEN=yyy \
   -e MSP_WEBHOOK_TOKEN=zzz \
+  -e PROVIDER=anthropic \
   msp-webhook-proxy
 ```
 
-> Para Datadog usa `MSP_WEBHOOK_TOKEN`; para un MSP que firma el payload usa `MSP_WEBHOOK_SECRET`.
+Con proxy, la URL en Datadog apunta a `https://<tu-dominio>/webhook` con `Authorization: Bearer <MSP_WEBHOOK_TOKEN>`.
 
-## Proveedor de ejecución (Anthropic o Cursor)
+### Autenticación del proxy
 
-El proxy puede disparar la rutina en dos proveedores, según la env var `PROVIDER`:
+| Esquema | Variable | Header esperado | Para |
+|---------|----------|-----------------|------|
+| Token estático | `MSP_WEBHOOK_TOKEN` | `Authorization: Bearer <token>` | **Datadog**, PagerDuty |
+| Firma HMAC | `MSP_WEBHOOK_SECRET` | `X-MSP-Signature: sha256=<hex>` | Zabbix, integraciones custom |
 
-| `PROVIDER` | Qué hace | Modelo |
-|------------|----------|--------|
-| `anthropic` (default) | Dispara una Claude Code Routine vía `/fire` | Fire-and-forget: Anthropic ejecuta y no se espera respuesta |
-| `cursor` | Lanza un Cloud Agent vía `POST /v1/agents` | El proxy hace **polling** del run (la API v1 de Cursor aún no entrega callbacks) y registra el estado hasta `FINISHED`/`ERROR` |
+Basta con satisfacer uno si se configuran ambos.
 
-Para Cursor, configura `CURSOR_API_KEY` y `CURSOR_REPO_URL` (ver tabla de credenciales). El agente recibe un prompt que sigue las fases de `CLAUDE.md` (revisión, debug, propuesta de resolución, ticket) y puede abrir el PR automáticamente (`CURSOR_AUTO_CREATE_PR`).
+### Proveedor de ejecución (con proxy)
 
-## Control de volumen (evitar tormentas de tickets)
-
-Dos capas, complementarias:
-
-1. **En Datadog** (en el origen): notification grouping, ventanas de evaluación, "notify on" tras N fallos, renotify con límite, y muting de dependencias. Apunta solo los monitores deseados con `@webhook-<nombre>`.
-2. **En el proxy** (red de seguridad): deduplicación por huella de alerta. Alertas idénticas dentro de `DEDUP_TTL_SECONDS` (default 300s) se descartan con `200 deduplicated` en vez de generar un ticket nuevo. La huella se borra si el disparo falla, para permitir reintentos legítimos.
+| `PROVIDER` | Qué hace |
+|------------|----------|
+| `anthropic` (default) | Dispara Claude Code Routine vía `/fire` — fire-and-forget |
+| `cursor` | Lanza Cloud Agent vía `POST /v1/agents` + polling hasta `FINISHED`/`ERROR` |
 
 ## Credenciales necesarias
 
